@@ -1,0 +1,106 @@
+---
+title: "DATA ANALYSIS 3 - Dynamics of the human nasal microbiota and Staphylococcus aureus CC398 carriage in pig truck drivers across one workweek"
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 2
+    df_print: kable
+author: Anna Ingham, Statens Serum Institut, Denmark
+date: "February 2021"
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r include=FALSE}
+library(openxlsx)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(RColorBrewer)
+theme_set(theme_bw())
+```
+
+
+#### Read data
+```{r}
+meta_all <- read.xlsx("./R_DATA/PigTrDr_isolate_metadata.xlsx")
+```
+
+
+## **Timelines of lineage transitions per driver/spouse/truck**
+```{r}
+dim(meta_all)
+
+meta_all$Lineage[is.na(meta_all$Lineage)] <- c("xMRSA_negative")
+
+meta_all$Consecutive_time_point <- paste(meta_all$Day, meta_all$Time_point_within_day_long, sep = "_")
+
+n_last <- 1                                # Specify number of characters to extract
+meta_all$Isolate_number <- substr(meta_all$Isolate_ID,nchar(meta_all$Isolate_ID)- n_last +1, nchar(meta_all$Isolate_ID))
+
+meta_all$Consecutive_time_point_Iso <- paste(meta_all$Consecutive_time_point, meta_all$Isolate_number, sep = "_")
+
+meta_all$Household <- as.factor(meta_all$Household)
+```
+
+```{r}
+LineageColors <- c("#4c80b2", "#7dcc88", "#f1514b", "#fdbd73", "#a4a5a3")
+LineageColorScale <- scale_colour_manual(name = "Lineage", values = LineageColors, labels = c("L1", "L2", "L3", "Remainder", "MRSA negative"))
+LineageFillScale <- scale_fill_manual(name = "Lineage", values = LineageColors)
+```
+
+
+### Households with one isolate per time point
+```{r fig.height=8, fig.width=10}
+Day.labs <- c("Monday","Tuesday","Wednesday","Thursday", "Friday", "Monday")
+names(Day.labs) <- c( "1_Monday","2_Tuesday","3_Wednesday","4_Thursday", "5_Friday", "8_Monday")
+
+meta_all1 <- meta_all[!meta_all$Subject_ID %in% c("D02", "S02", "D07", "T02", "T07", "S07"),]
+meta_all1$Subject_ID <- factor(meta_all1$Subject_ID, levels = c("T09", "S09", "D09","T08","S08","D08", "T06","S06", "D06", "T05","S05","D05","T04","D04","T03","D03", "D01"))# starting from below
+
+
+tps <- ggplot(meta_all1, aes(x=Time_point_within_day_long, y=Subject_ID)) + LineageColorScale  + geom_line(aes(x=Time_point_within_day_long, group=Subject_ID), alpha=0.6) + geom_point(aes(color=Lineage), size =8, shape = 15)  + theme(panel.border = element_rect(colour = "black", fill=NA, size=1),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_text(size =16, face = "bold"), axis.text.x = element_text(size = 10, angle=0, face="bold"), axis.text.y = element_text(size = 14, face="bold"), legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.x = element_text(size=14, face = "bold"), strip.text.y = element_text(size=14, face = "bold", angle = 0),legend.position = "bottom", plot.title = element_text(size=14, face="bold")) + xlab("") + ylab("") + facet_grid(Household~Day, scales="free_y", space = "free_y", labeller = labeller(Day=Day.labs)) + geom_vline(xintercept = c(1.5,2.5), linetype="dashed", color="black") + scale_x_discrete(labels=c("A_morning" = "Morning", "B_after_first_unloading" = "1", "C_after_second_unloading" = "2")) + scale_y_discrete(labels=c("D01" = "Driver 01", "D03" = "Driver 03", "D04" = "Driver 04", "D05" = "Driver 05", "S05" = "Spouse 05", "D06" = "Driver 06", "S06" = "Spouse 06", "D08" = "Driver 08", "S08" = "Spouse 08", "D09" = "Driver 09", "S09" = "Spouse 09", "T03" = "Truck 03", "T04" = "Truck 04","T05" = "Truck 05","T06" = "Truck 06", "T08" = "Truck 08","T09" = "Truck 09")) 
+
+tps
+```
+
+
+
+### Households with multiple isolates per time point
+```{r}
+meta_all$Time_point_within_day_long_Iso <- paste(meta_all$Time_point_within_day_long, meta_all$Isolate_number, sep = "_")
+```
+
+
+#### Household 02
+```{r fig.height=4, fig.width=16}
+meta02 <- meta_all
+meta02$Subject_ID <- factor(meta02$Subject_ID, levels = c("T02", "S02", "D02"))
+
+Day.labs <- c("Monday","Tuesday","Wednesday","Thursday", "Friday")
+names(Day.labs) <- c( "1_Monday","2_Tuesday","3_Wednesday","4_Thursday", "5_Friday")
+
+H2 <- ggplot(meta02[meta02$Subject_ID %in% c("T02", "S02", "D02"),], aes(x=Time_point_within_day_long_Iso, y=Subject_ID)) + LineageColorScale + geom_line(aes(x=Time_point_within_day_long_Iso, group=Subject_ID), alpha=0.6)  + geom_point(aes(color=Lineage), size =4.5, shape = 15)  + theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_text(size =16, face = "bold"), axis.text.x = element_text(size = 10, angle=75, hjust = 1), axis.ticks.x = element_blank(), axis.text.y = element_text(size = 16, face="bold"), legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.x = element_text(size=14, face = "bold"), legend.position = "right") + xlab("") + ylab("") + facet_grid(.~Day, scales="free_y", space = "free_y", labeller = labeller(Day=Day.labs)) + geom_vline(xintercept = c(5.5,10.5), linetype="dashed") + scale_y_discrete(labels=c("D02" = "Driver 02", "S02" = "Spouse 02", "T02" = "Truck 02")) 
+
+H2
+```
+
+
+#### Household 07
+```{r fig.height=4, fig.width=18}
+meta07 <- meta_all
+meta07$Subject_ID <- factor(meta07$Subject_ID, levels = c("T07", "S07", "D07"))
+
+Day.labs <- c("Monday","Tuesday","Wednesday","Thursday", "Friday", "Monday")
+names(Day.labs) <- c( "1_Monday","2_Tuesday","3_Wednesday","4_Thursday", "5_Friday", "8_Monday")
+
+H7 <- ggplot(meta07[meta07$Subject_ID %in% c("T07", "S07", "D07"),], aes(x=Time_point_within_day_long_Iso, y=Subject_ID)) + scale_colour_manual(name = "Lineage", values = LineageColors[c(2:3,5)], labels = c("L2", "L3", "MRSA negative")) + geom_line(aes(x=Time_point_within_day_long_Iso, group=Subject_ID), alpha=0.6)  + geom_point(aes(color=Lineage), size =4.5, shape = 15)  + theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_text(size =16, face = "bold"), axis.text.x = element_text(size = 10, angle=75, hjust = 1), axis.ticks.x = element_blank(), axis.text.y = element_text(size = 16, face="bold"), legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.x = element_text(size=14, face = "bold"), legend.position = "right") + xlab("") + ylab("") + facet_grid(.~Day, scales="free_y", space = "free_y", labeller = labeller(Day=Day.labs)) + geom_vline(xintercept = c(5.5,10.5), linetype="dashed") + scale_y_discrete(labels=c("D07" = "Driver 07", "S07" = "Spouse 07", "T07" = "Truck 07")) 
+
+H7
+```
+
+
+
+
+
+
