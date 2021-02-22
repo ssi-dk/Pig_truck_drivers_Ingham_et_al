@@ -22,4 +22,4 @@ Phyloseq object needed in scripts 1 and 2
 Metadata table needed in scripts 3 and 4 
  
 ## html reports (R analysis outputs)
-See _add figshare link_
+See https://figshare.com/projects/Dynamics_of_the_human_nasal_microbiota_and_Staphylococcus_aureus_CC398_carriage_in_pig_truck_drivers_across_one_workweek/98933
