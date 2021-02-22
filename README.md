@@ -1,0 +1,25 @@
+# Dynamics of the human nasal microbiota and _Staphylococcus aureus_ CC398 carriage in pig truck drivers across one workweek
+R scripts and data to reproduce the analyses associated with the manuscript
+ 
+## Scripts
+### Pig_truck_drivers_analysis_Ingham_et_al_1.Rmd 
+Alpha & beta diversity; community state typing into CSTs; indicator taxa analysis; absolute bacterial load 
+ 
+### Pig_truck_drivers_analysis_Ingham_et_al_2.Rmd 
+Staphylococcal abundance; CST dynamics; Markov chains 
+ 
+### Pig_truck_drivers_analysis_Ingham_et_al_3.Rmd 
+_Staphylococcus aureus_ CC398 lineage dynamics 
+ 
+### Pig_truck_drivers_analysis_Ingham_et_al_4.R 
+Phylogenetic tree visualization 
+ 
+## Data
+### ps1_pig_truck_drivers.RData 
+Phyloseq object needed in scripts 1 and 2 
+ 
+### PigTrDr_isolate_metadata.xlsx 
+Metadata table needed in scripts 3 and 4 
+ 
+## html reports (R analysis outputs)
+See _add figshare link_
