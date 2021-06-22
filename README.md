@@ -15,8 +15,8 @@ _Staphylococcus aureus_ CC398 lineage dynamics
 Phylogenetic tree visualization 
  
 ## Data
-### ps1_pig_truck_drivers.RData 
-Phyloseq object needed in scripts 1 and 2 
+### ps1_pig_truck_drivers_NEW.RData 
+Phyloseq object needed in scripts 1 and 2 (with updated qPCR data)
  
 ### PigTrDr_isolate_metadata.xlsx 
 Metadata table needed in scripts 3 and 4 
