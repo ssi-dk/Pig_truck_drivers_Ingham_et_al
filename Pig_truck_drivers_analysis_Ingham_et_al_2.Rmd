@@ -1,0 +1,322 @@
+---
+title: "DATA ANALYSIS 2 - Dynamics of the human nasal microbiota and Staphylococcus aureus CC398 carriage in pig truck drivers across one workweek"
+output: 
+  html_document: 
+    toc: yes
+    toc_depth: 2
+    df_print: kable
+author: Anna Ingham, Statens Serum Institut, Denmark
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+editor_options: 
+  chunk_output_type: inline
+---
+
+
+##### Load packages
+```{r include=FALSE}
+library(phyloseq); packageVersion("phyloseq")
+library(ggplot2); packageVersion("ggplot2")
+library(dplyr); packageVersion("dplyr")
+library(tibble); packageVersion("tibble")
+library(Biostrings); packageVersion("Biostrings")
+library(vegan); packageVersion("vegan")
+library(openxlsx)
+library(tidyr)
+library(ggrepel)
+library(genefilter)
+library(PMCMR)
+library(DescTools)
+library(lme4)
+library(lmerTest)
+library(ggResidpanel)
+library(ComplexHeatmap)
+library(genefilter)
+library(cluster)
+library(factoextra)
+library(RColorBrewer)
+library(markovchain)
+library(diagram)
+#devtools::install_github("easystats/report")
+library(report)#instead of psycho
+library(modelbased)#instead of psycho
+library(ranacapa)
+library(splinectomeR)
+library(sm)
+library(ggalluvial)
+library(labdsv)
+library(khroma)
+library(reshape2)
+theme_set(theme_bw())
+```
+
+##### Read phyloseq objects generated in script 1
+```{r}
+ps1 <- readRDS("./R_DATA/ps1_pig_truck_drivers_NEW.RData")
+ps1_hell <- transform_sample_counts(ps1, function(x) sqrt(x / sum(x))) #hellinger transform
+summary(sample_sums(ps1_hell))
+```
+
+
+
+## **Which staphylococcal species is/are dominant in CST3?**
+
+### Most abundant Staphylococcus overall:
+```{r}
+ps1_hell_Staph <- subset_taxa(ps1_hell, Genus=="Staphylococcus")
+sort(taxa_sums(ps1_hell_Staph), decreasing = TRUE)[1:10]
+```
+
+#### Retrieve the original sequences of the most abundant staphylococcal ASVs and BLAST them
+```{r}
+refseq(ps1)[c(1:2,10,16)]
+#BLAST:
+#ASV_1:aureus
+#ASV_2:epidermidis
+#ASV_16:epidermidis/uncultured
+#ASV_10: uncultured/equorum
+```
+
+
+```{r}
+#Relative abundance among all:
+ps1_rel <- transform_sample_counts(ps1, function(x) x / sum(x))
+df_ps1_rel <- psmelt(ps1_rel)
+```
+
+```{r}
+df_ps1_rel$BLAST_tax <- with(df_ps1_rel, ifelse(OTU=="ASV_1", "Staphylococcus aureus (ASV1)", ifelse(OTU=="ASV_2", "Staphylococcus epidermidis (ASV2)",ifelse(Genus== "Staphylococcus", "Other staphylococcal ASVs", "Other bacteria"))))
+
+df_ps1_rel$BLAST_tax[is.na(df_ps1_rel$BLAST_tax)] <- c("Other bacteria")
+df_CST <- as(sample_data(ps1_hell), "data.frame")
+df_ps1_rel1 <- left_join(df_ps1_rel, df_CST)
+```
+
+```{r fig.height=3, fig.width=8}
+SP <-  ggplot(data = df_ps1_rel1, aes(x=Sample, y=Abundance, fill=BLAST_tax)) +
+  geom_bar(stat = "identity", width = 0.9) + 
+   scale_fill_manual(values = c("#a6a6a6", "#747474", "#1f968bff", "#39558cff")) +
+  theme(axis.title.x = element_blank(), axis.ticks.x=element_blank(), axis.text.x = element_blank(), legend.position = "bottom",  legend.title = element_blank(), strip.background =element_rect(fill="white"), strip.text.x = element_text(size=14, face = "bold")) +  guides(fill=guide_legend(nrow=1)) + facet_grid(.~CST, scales="free_x", space = "free", labeller = label_both) + ylab("Relative abundance")
+
+SP
+```
+
+#### Average and median relative abundances per CST
+```{r}
+df_ps1_rel1 %>% group_by(BLAST_tax, CST) %>% summarise(median=paste(round(median(Abundance)*100,1),"%"),mean=paste(round(mean(Abundance)*100,1),"%"))
+```
+
+
+
+### **A note on Psychrobacter**
+
+##### How abundant are ASVs of the Psychrobacter genus in general?
+##### This is a somewhat unexpected genus to see in such abundance
+##### Examine this on raw read counts
+```{r}
+psy <- subset_taxa(ps1, Genus=="Psychrobacter")
+psy
+```
+
+```{r 8}
+df_psy <- psmelt(psy)
+df_psy$Species <- as.character(df_psy$Species)
+df_psy$Species[is.na(df_psy$Species)] <- c("unknown")
+df_psy$Species <- as.factor(df_psy$Species)
+```
+
+```{r, fig.height=4, fig.width=8}
+colourCount = length(unique(df_psy$Species))
+getPalette = colorRampPalette(brewer.pal(12, "Paired"))
+
+ ggplot(data = df_psy, aes(x=Sample, y=Abundance, fill=Species)) +
+  geom_bar(stat = "identity", width = 0.8) + 
+   scale_fill_manual(values = getPalette(colourCount)) +
+  theme(axis.title.x = element_blank(), axis.ticks.x=element_blank(), axis.text.x = element_blank(), legend.position = "bottom", strip.background =element_rect(fill="white"), strip.text.x = element_text(size=8, face = "bold")) +  guides(fill=guide_legend(nrow=8)) + facet_grid(.~Subject_type+Time_point_within_day_long, scales="free_x") + ylab("Absolute abundance")
+```
+
+
+Of note, Psychrobacter is very likely not a systemic contaminantion, since it is completely absent from our negative controls (data not shown here) and mostly occurs in drivers after pig contact (therfore likely originating from pigs).
+
+
+
+## **Timelines of CST transitions per driver/spouse**
+
+
+### For households 02 and 07
+```{r fig.height=5, fig.width=8}
+otu_df <- data.frame(sample_data(ps1_hell))
+otu_df$Consecutive_time_point_int <- as.numeric(as.character(otu_df$Consecutive_time_point_int))
+
+CSTColors <- brewer.pal(3,"Dark2")
+CSTColors <- CSTColors[c(3,2,1)]
+names(CSTColors) <- c("1","2","3")
+CSTColorScale <- scale_colour_manual(name = "CST", values = CSTColors[1:3])
+CSTFillScale <- scale_fill_manual(name = "CST", values = CSTColors[1:3])
+
+ggplot(otu_df[otu_df$Subject_type != "non_exposed" & otu_df$Subject_ID %in% c("D02", "S02", "D07", "S07"),], aes(x=Time_point_within_day_long, y=Subject_ID)) + CSTColorScale + geom_line(aes(x=Time_point_within_day_long, group=Subject_ID), alpha=0.6) + geom_point(aes(color=CST), size =9, shape = 15)  + theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_text(size =16, face = "bold"), axis.text.x = element_text(size = 10, angle=75, hjust = 1), axis.text.y = element_text(size = 14), legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), legend.position = "bottom", strip.background =element_rect(fill="white", size=2), strip.text.y = element_text(size=10, face = "bold")) + xlab("") + ylab("") + facet_grid(Household~Day, scales="free_y", space = "free_y", labeller = label_both)+ geom_vline(xintercept = c(1.5,2.5), linetype="dashed", color="grey")
+```
+
+### For the remaining households
+```{r, fig.height=8, fig.width=10}
+Day.labs <- c("Monday","Tuesday","Wednesday","Thursday", "Friday", "Monday")
+names(Day.labs) <- c( "1_Monday","2_Tuesday","3_Wednesday","4_Thursday", "5_Friday", "8_Monday")
+
+
+otu_df1 <- otu_df[!otu_df$Subject_ID %in% c("D02", "S02", "D07", "S07") & otu_df$Subject_type != "non_exposed",]
+otu_df1$Subject_ID <- factor(otu_df1$Subject_ID, levels = c("S09", "D09","S08","D08", "S06", "D06", "S05","D05","D04","D03", "D01"))# starting from below
+
+ggplot(otu_df1, aes(x=Time_point_within_day_long, y=Subject_ID)) + CSTColorScale + geom_line(aes(x=Time_point_within_day_long, group=Subject_ID), alpha=0.6) + geom_point(aes(color=CST), size =11, shape = 15)  + theme(panel.border = element_rect(colour = "black", fill=NA, size=1),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_text(size =16, face = "bold"), axis.text.x = element_text(size = 10, angle=0, face="bold"), axis.text.y = element_text(size = 14, face="bold"), legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), legend.position = "bottom", strip.background =element_rect(fill="white", size=2), strip.text.x = element_text(size=14, face = "bold"), strip.text.y = element_text(size=14, face = "bold", angle=0)) + xlab("") + ylab("") + facet_grid(Household~Day, scales="free_y", space = "free_y",labeller = labeller(Day=Day.labs))+ geom_vline(xintercept = c(1.5,2.5), linetype="dashed", color="black") + scale_x_discrete(labels=c("A_morning" = "Morning", "B_after_first_unloading" = "1", "C_after_second_unloading" = "2")) + scale_y_discrete(labels=c("D01" = "Driver 01", "D03" = "Driver 03", "D04" = "Driver 04", "D05" = "Driver 05", "S05" = "Spouse 05", "D06" = "Driver 06", "S06" = "Spouse 06", "D08" = "Driver 08", "S08" = "Spouse 08", "D09" = "Driver 09", "S09" = "Spouse 09")) 
+```
+
+
+
+#### Add CST frequencies to data
+```{r}
+otu_df_tp <- otu_df[otu_df$Subject_type =="driver",]
+otu_df_tp$Subject_ID_by_day <- paste(otu_df_tp$Subject_ID,otu_df_tp$Day)
+otu_df_tp <- otu_df_tp %>%  group_by(Time_point_within_day_long, CST) %>%  mutate(count = n())
+```
+
+
+### Sankey plot of CST transitions (drivers only) - complete cases only - Split up into three plots corresponding to the Markov chains (below)
+
+Fom morning to 1. unloading
+```{r}
+otu_df_tp_comp <- otu_df_tp[otu_df_tp$Time_point_within_day_long !="C_after_second_unloading", ]
+
+tt <- table(otu_df_tp_comp$Subject_ID_by_day)
+
+otu_df_tp_comp <- otu_df_tp_comp[otu_df_tp_comp$Subject_ID_by_day %in% names(tt[tt == 2]), ]
+otu_df_tp_comp <- otu_df_tp_comp %>%  group_by(Time_point_within_day_long, CST) %>%  mutate(count = n())  
+
+ggplot(otu_df_tp_comp,
+       aes(x = Time_point_within_day_long, stratum = CST, alluvium = Subject_ID_by_day,
+           fill = CST, label = CST)) +
+  scale_x_discrete(labels=c("A_morning" = "Morning", "B_after_first_unloading" = "After 1. unloading", "C_after_second_unloading" = "After 2. unloading"),expand = c(.1, .1)) +
+  CSTFillScale +
+  geom_flow(alpha=0.75) +
+  geom_stratum() +
+  geom_text(aes(label = paste0("CST ", CST, " ", "(n=",count,")")),stat = "stratum", size = 3, color = "white", fontface="bold") +
+ # geom_text(aes(label =count/count), stat = "flow", size = 1.8, nudge_x = -.2) +
+ theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_blank(), axis.text.x = element_text(size = 10), axis.text.y = element_blank(), axis.ticks.y = element_blank(),legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.y = element_text(size=14, face = "bold"), legend.position = "none") 
+```
+
+From 1. to 2. unloading
+```{r }
+otu_df_tp_comp <- otu_df_tp[otu_df_tp$Time_point_within_day_long !="A_morning", ]
+
+tt <- table(otu_df_tp_comp$Subject_ID_by_day)
+
+otu_df_tp_comp <- otu_df_tp_comp[otu_df_tp_comp$Subject_ID_by_day %in% names(tt[tt == 2]), ]
+otu_df_tp_comp <- otu_df_tp_comp %>%  group_by(Time_point_within_day_long, CST) %>%  mutate(count = n())  
+
+ggplot(otu_df_tp_comp,
+       aes(x = Time_point_within_day_long, stratum = CST, alluvium = Subject_ID_by_day,
+           fill = CST, label = CST)) +
+  scale_x_discrete(expand = c(.1, .1), labels=c("A_morning" = "Morning", "B_after_first_unloading" = "After 1. unloading", "C_after_second_unloading" = "After 2. unloading")) +
+  CSTFillScale +
+  geom_flow(alpha=0.75) +
+  geom_stratum() +
+  geom_text(aes(label = paste0("CST ", CST, " ", "(n=",count,")")),stat = "stratum", size = 3, color = "white", fontface="bold") +
+ # geom_text(aes(label =count/count), stat = "flow", size = 1.8, nudge_x = -.2) +
+ theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_blank(), axis.text.x = element_text(size = 10), axis.text.y = element_blank(), axis.ticks.y = element_blank(),legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.y = element_text(size=14, face = "bold"), legend.position = "none")
+```
+
+
+From 2. unloading to next morning:
+```{r }
+otu_df_tp_comp <- otu_df_tp[otu_df_tp$Time_point_within_day_long !="B_after_first_unloading", ]
+
+otu_df_tp_comp$to_next_morning <- otu_df_tp_comp$Consecutive_time_point
+
+otu_df_tp_comp <- otu_df_tp_comp %>% mutate(to_next_morning = recode(to_next_morning,  "1_Monday_C_after_second_unloading" = "to_2", "2_Tuesday_A_morning" = "to_2" , "2_Tuesday_C_after_second_unloading" = "to_3", "3_Wednesday_A_morning" = "to_3", "3_Wednesday_C_after_second_unloading" = "to_4", "4_Thursday_A_morning" = "to_4",  "4_Thursday_C_after_second_unloading" = "to_5", "5_Friday_A_morning" = "to_5", "5_Friday_C_after_second_unloading" = "to_8",  "8_Monday_A_morning"  = "to_8"))
+
+otu_df_tp_comp$Subject_ID_next_morning <- paste(otu_df_tp_comp$Subject_ID, otu_df_tp_comp$to_next_morning)
+otu_df_tp_comp$Time_point_within_day_long1 <- otu_df_tp_comp$Time_point_within_day_long
+
+otu_df_tp_comp$Time_point_within_day_long1 <- factor(otu_df_tp_comp$Time_point_within_day_long1, levels = c("C_after_second_unloading", "A_morning"))
+
+#otu_df_tp_comp <- otu_df_tp_comp %>% mutate(Time_point_within_day_long1 = recode(Time_point_within_day_long1, "A_morning" = 2, "C_after_second_unloading" = 1))
+
+
+tt <- table(otu_df_tp_comp$Subject_ID_next_morning)
+
+otu_df_tp_comp <- otu_df_tp_comp[otu_df_tp_comp$Subject_ID_next_morning %in% names(tt[tt == 2]), ]
+otu_df_tp_comp <- otu_df_tp_comp %>%  group_by(Time_point_within_day_long1, CST) %>%  mutate(count = n())  
+
+ggplot(otu_df_tp_comp,
+       aes(x = Time_point_within_day_long1, stratum = CST, alluvium = Subject_ID_next_morning,
+           fill = CST, label = CST)) +
+ scale_x_discrete(expand = c(.1, .1), labels=c("A_morning" = "Morning", "B_after_first_unloading" = "After 1. unloading", "C_after_second_unloading" = "After 2. unloading")) +
+  CSTFillScale +
+  geom_flow(alpha=0.75) +
+  geom_stratum() +
+  geom_text(aes(label = paste0("CST ", CST, " ", "(n=",count,")")),stat = "stratum", size = 3, color = "white", fontface="bold") +
+ # geom_text(aes(label =count/count), stat = "flow", size = 1.8, nudge_x = -.2) +
+ theme(panel.border = element_rect(colour = "black", fill=NA, size=2),panel.grid.minor = element_blank(), panel.grid.major = element_blank(), panel.background = element_blank(), axis.title.x = element_blank(), axis.text.x = element_text(size = 10), axis.text.y = element_blank(), axis.ticks.y = element_blank(),legend.title = element_text(size = 16, face = "bold"), legend.text = element_text(size = 16), strip.background =element_rect(fill="white", size=2), strip.text.y = element_text(size=14, face = "bold"), legend.position = "none")
+```
+
+
+
+## **Markov chain models of transitions between CSTs**
+
+### Calculate frequencies and make markov chain models (drivers only)
+```{r fig.height=6, fig.width=6}
+otu_df_tp <- subset(otu_df_tp, select=c(Subject_ID_by_day, Time_point_within_day_long, CST))
+otu_df_tp <- otu_df_tp[! rownames(otu_df_tp) %in% c("D04_4_1.2", "D05_5_2.2"),] 
+otu_df_tpa <- spread(otu_df_tp, key = Time_point_within_day_long, value = CST)
+
+
+#make transition matrix: 
+mcFit <- markovchainFit(data=otu_df_tpa[,2:3])
+
+#mcFit_m <- as(mcFit$estimate, "markovchain")
+mcFit_m1 <- as(t(mcFit$estimate), "matrix")
+mcFit_m2 <- round(mcFit_m1, 2)
+
+plotmat(mcFit_m2, box.col = CSTColors, relsize = 0.75, box.size = 0.1, self.lwd = 3*(mcFit_m2+1), lwd = 3*(mcFit_m2+1), arr.length = mcFit_m2+0.001, arr.width = mcFit_m2+0.0001, arr.type = "curved", box.cex = 2, self.shiftx = c(0.1, -0.1, -0.1), box.lwd = 0, shadow.size = 0, dtext = 0.6, main = "CST transitions from morning to first unloading (all days collapsed)")
+```
+
+
+#### How to read this plot: When a driver started out with CST 1 in the morning, this CST was often kept after the first unloading (probability to return from CST 1 to CST 1 = 88%, see plot).12% would switch to CST 3.
+#### When a driver had CST 2 in the morning, they would keep CST 2 also after first unloading with a probability of 10% (i.e. 10% of drivers with CST 2 would also keep it at the next time point). 90% would change from CST 2 to CST 1 after first unloading.
+#### When a driver had CST 3 in the morning, they would keep CST 3 also after first unloading with a probability of 43%. 57% would change to CST 1 after first unloading.
+
+
+```{r fig.height=6, fig.width=6}
+#make transition matrix: 
+mcFit <- markovchainFit(data=otu_df_tpa[,3:4])
+
+#mcFit_m <- as(mcFit$estimate, "markovchain")
+mcFit_m1 <- as(t(mcFit$estimate), "matrix")
+mcFit_m2 <- round(mcFit_m1, 2)
+
+
+plotmat(mcFit_m2, box.col = CSTColors, relsize = 0.75, box.size = 0.1, self.lwd = 3*(mcFit_m2+1), lwd = 3*(mcFit_m2+1), arr.length = mcFit_m2+0.001, arr.width = mcFit_m2+0.0001, arr.type = "curved", box.cex = 2, self.shiftx = c(0.1, -0.1, -0.1), box.lwd = 0, shadow.size = 0, dtext = 0.6, main = "CST transitions from first to second unloading (all days collapsed)")
+```
+
+
+
+```{r fig.height=6, fig.width=6}
+otu_df_tpa_2 <- as.data.frame(cbind(otu_df_tpa$C_after_second_unloading[1:49], otu_df_tpa$A_morning[2:50]))
+otu_df_tpa_3 <- otu_df_tpa_2[!is.na(otu_df_tpa_2$V1)&!is.na(otu_df_tpa_2$V2),]
+
+#make transition matrix: 
+mcFit <- markovchainFit(data=otu_df_tpa_3)
+
+#mcFit_m <- as(mcFit$estimate, "markovchain")
+#mcFit_m1 <- as(mcFit$estimate[c(1,3),], "matrix")
+mcFit_m1 <- as(mcFit$estimate, "matrix")
+mcFit_m1 <- t(mcFit_m1)
+mcFit_m2 <- round(mcFit_m1, 2)
+
+
+plotmat(mcFit_m2, box.col = CSTColors, relsize = 0.75, box.size = 0.1, self.lwd = 3*(mcFit_m2+1), lwd = 3*(mcFit_m2+1), arr.length = mcFit_m2+0.001, arr.width = mcFit_m2+0.0001, arr.type = "curved", box.cex = 2, self.shiftx = c(0.1, -0.1, -0.1), box.lwd = 0, shadow.size = 0, dtext = 0.6, main = "CST transitions from second unloading to next morning (all days collapsed)")
+```
+
+
+This includes all shifts from after second unloading to _next day's_ morning, with the exception of the last shift from Friday after second unloading to following Monday morning.
+
+
+
+
