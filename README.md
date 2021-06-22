@@ -3,7 +3,7 @@ R scripts and data to reproduce the analyses associated with the manuscript
  
 ## Scripts
 ### Pig_truck_drivers_analysis_Ingham_et_al_1.Rmd 
-Alpha & beta diversity; community state typing into CSTs; indicator taxa analysis; absolute bacterial load 
+Alpha & beta diversity; community state typing into CSTs; LEfSe analysis; absolute bacterial load 
  
 ### Pig_truck_drivers_analysis_Ingham_et_al_2.Rmd 
 Staphylococcal abundance; CST dynamics; Markov chains 
